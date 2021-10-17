@@ -4,6 +4,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  AccountInfo,
 } from '@solana/web3.js';
 import { homedir } from 'os';
 import * as fs from 'fs';
@@ -32,15 +33,15 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const DISPLAY_FIRST = 10;
 
 const reserveLookUpTable = {
-  'X9ByyhmtQH3Wjku9N5obPy54DbVjZV7Z99TPJZ2rwcs': 'SOL',
-  'DcENuKuYd6BWGhKfGr7eARxodqG12Bz1sN5WA8NwvLRx': 'USDC',
+  X9ByyhmtQH3Wjku9N5obPy54DbVjZV7Z99TPJZ2rwcs: 'SOL',
+  DcENuKuYd6BWGhKfGr7eARxodqG12Bz1sN5WA8NwvLRx: 'USDC',
   '4tqY9Hv7e8YhNQXuH75WKrZ7tTckbv2GfFVxmVcScW5s': 'USDT',
-  'DSw99gXoGzvc4N7cNGU7TJ9bCWFq96NU2Cczi1TabDx2': 'PAI',
-  'ZgS3sv1tJAor2rbGMFLeJwxsEGDiHkcrR2ZaNHZUpyF': 'SRM',
-  'DSST29PMCVkxo8cf5ht9LxrPoMc8jAZt98t6nuJywz8p': 'BTC',
-  'BnhsmYVvNjXK3TGDHLj1Yr1jBGCmD1gZMkAyCwoXsHwt': 'MER',
+  DSw99gXoGzvc4N7cNGU7TJ9bCWFq96NU2Cczi1TabDx2: 'PAI',
+  ZgS3sv1tJAor2rbGMFLeJwxsEGDiHkcrR2ZaNHZUpyF: 'SRM',
+  DSST29PMCVkxo8cf5ht9LxrPoMc8jAZt98t6nuJywz8p: 'BTC',
+  BnhsmYVvNjXK3TGDHLj1Yr1jBGCmD1gZMkAyCwoXsHwt: 'MER',
   '9gDF5W94RowoDugxT8cM29cX8pKKQitTp2uYVrarBSQ7': 'mSOL',
-  'GRJyCEezbZQibAEfBKCRAg5YoTPP2UcRSTC7RfzoMypy': 'pSOL',
+  GRJyCEezbZQibAEfBKCRAg5YoTPP2UcRSTC7RfzoMypy: 'pSOL',
   '7dXHPrJtwBjQqU1pLKfkHbq9TjQAK9jTms3rnj1i3G77': 'SBR',
 };
 
@@ -69,7 +70,9 @@ async function runPartialLiquidator() {
   // liquidator's keypair
   const keyPairPath =
     process.env.KEYPAIR || `${homedir()}/.config/solana/id.json`;
-  const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(keyPairPath, 'utf-8'))));
+  const payer = Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(fs.readFileSync(keyPairPath, 'utf-8'))),
+  );
 
   console.log(`Port liquidator launched on cluster=${clusterUrl}`);
 
@@ -226,26 +229,28 @@ function isNoBorrow(obligation: PortBalance): boolean {
 }
 
 // unused: helper only
-function getTotalShareTokenCollateralized(portBalances: PortBalance[]): Map<string, Big> {
+function getTotalShareTokenCollateralized(
+  portBalances: PortBalance[],
+): Map<string, Big> {
   const amounts = new Map();
-  amounts.set("total_amount", new Big(0))
+  amounts.set('total_amount', new Big(0));
 
-  portBalances.forEach(
-    balance => {
-      amounts.set("total_amount", amounts.get("total_amount").add(balance.getDepositedValue()))
-      balance.getCollaterals().forEach(
-        collateral => {
-          const reserveId = collateral.getReserveId().toString();
-          if (amounts.has(reserveId)) {
-            amounts.set(reserveId, amounts.get(reserveId).add(collateral.getShare().getRaw()))
-          } else (
-            amounts.set(reserveId, new Big(0))
-          )
-        }
-      )
-    }
-  )
-  return amounts
+  portBalances.forEach((balance) => {
+    amounts.set(
+      'total_amount',
+      amounts.get('total_amount').add(balance.getDepositedValue()),
+    );
+    balance.getCollaterals().forEach((collateral) => {
+      const reserveId = collateral.getReserveId().toString();
+      if (amounts.has(reserveId)) {
+        amounts.set(
+          reserveId,
+          amounts.get(reserveId).add(collateral.getShare().getRaw()),
+        );
+      } else amounts.set(reserveId, new Big(0));
+    });
+  });
+  return amounts;
 }
 
 async function getUnhealthyObligations(connection: Connection) {
@@ -265,7 +270,7 @@ async function getUnhealthyObligations(connection: Connection) {
     });
 
   console.log(
-`
+    `
 Total number of loans are ${portBalances.length} and possible liquidation debts are ${sortedObligations.length}
 `,
   );
@@ -443,8 +448,8 @@ async function liquidateAccount(
         );
 
   signers.push(transferAuthority);
-  const sig = await connection.sendTransaction(transaction, signers);
-  console.log(`liqudiation transaction sent: ${sig}.`);
+  const liquidationSig = await connection.sendTransaction(transaction, signers);
+  console.log(`liqudiation transaction sent: ${liquidationSig}.`);
 
   const tokenwallet = await findLargestTokenAccountForOwner(
     connection,
@@ -522,6 +527,40 @@ function liquidateByPayingSOL(
   return transferAuthority;
 }
 
+async function fetchStakingAccounts(
+  connection: Connection,
+  owner: PublicKey,
+  stakingPool: PublicKey | null,
+): Promise<
+  Array<{
+    pubkey: PublicKey;
+    account: AccountInfo<Buffer>;
+  }>
+> {
+  if (stakingPool === null) {
+    return [];
+  }
+  return await connection.getProgramAccounts(STAKING_PROGRAM_ID, {
+    filters: [
+      {
+        dataSize: 233,
+      },
+      {
+        memcmp: {
+          offset: 1 + 16,
+          bytes: owner.toBase58(),
+        },
+      },
+      {
+        memcmp: {
+          offset: 1 + 16 + 32,
+          bytes: stakingPool.toBase58(),
+        },
+      },
+    ],
+  });
+}
+
 async function liquidateByPayingToken(
   connection: Connection,
   transaction: Transaction,
@@ -537,27 +576,10 @@ async function liquidateByPayingToken(
   payer: Keypair,
 ): Promise<Keypair> {
   const transferAuthority = new Keypair();
-  const stakeAccounts = await connection.getProgramAccounts(
-    STAKING_PROGRAM_ID,
-    {
-      filters: [
-        {
-          dataSize: 233,
-        },
-        {
-          memcmp: {
-            offset: 1 + 16,
-            bytes: obligation.owner.toBase58(),
-          },
-        },
-        {
-          memcmp: {
-            offset: 1 + 16 + 32,
-            bytes: withdrawReserve.staking_pool!.toBase58(),
-          },
-        },
-      ],
-    },
+  const stakeAccounts = await fetchStakingAccounts(
+    connection,
+    obligation.owner,
+    withdrawReserve.staking_pool,
   );
 
   const laons = obligation.getLoans();
