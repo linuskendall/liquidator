@@ -184,15 +184,17 @@ async function readSymbolPrice(
   connection: Connection,
   reserve: ReserveInfo,
 ): Promise<Big> {
-  if (reserve.getOracleId() === null) {
-    return reserve.getMarkPrice().getRaw();
+  const oracleId = reserve.getOracleId();
+  if (oracleId) {
+    const oracleData = await connection.getAccountInfo(oracleId.key);
+    if (!oracleData) {
+      throw new Error('cannot fetch account oracle data')
+    }
+    return await parseOracleData(oracleData, reserve);
   }
 
-  const oracleData = await connection.getAccountInfo(reserve.getOracleId()!.key);
-  if (!oracleData) {
-    throw new Error('cannot fetch account oracle data')
-  }
-  return await parseOracleData(oracleData, reserve);
+  return reserve.getMarkPrice().getRaw();
+
 }
 
 function parseOracleData(accountInfo: AccountInfo<Buffer>, reserveInfo: ReserveInfo): Promise<Big> {
@@ -323,11 +325,11 @@ function generateEnrichedObligation(
   let loanValue = new Big(0);
   const borrowedAssetNames: string[] = [];
   for (const borrow of obligation.getLoans()) {
-    let reservePubKey = borrow.getReserveId().toString();
-    let name = reserveLookUpTable[reservePubKey];
-    let reserve = reserveContext.getReserveByReserveId(borrow.getReserveId());
-    let tokenPrice: Big = tokenToCurrentPrice.get(reservePubKey)!;
-    let totalPrice = borrow
+    const reservePubKey = borrow.getReserveId().toString();
+    const name = reserveLookUpTable[reservePubKey];
+    const reserve = reserveContext.getReserveByReserveId(borrow.getReserveId());
+    const tokenPrice: Big = tokenToCurrentPrice.get(reservePubKey)!;
+    const totalPrice = borrow
       .getAsset()
       .getRaw()
       .mul(tokenPrice)
@@ -339,13 +341,13 @@ function generateEnrichedObligation(
   const depositedAssetNames: string[] = [];
 
   for (const deposit of obligation.getCollaterals()) {
-    let reservePubKey = deposit.getReserveId().toString();
-    let name = reserveLookUpTable[reservePubKey];
-    let reserve = reserveContext.getReserveByReserveId(deposit.getReserveId());
-    let exchangeRatio = reserve.getExchangeRatio().getPct()?.getRaw();
-    let liquidationThreshold = reserve.params.liquidationThreshold.getRaw();
-    let tokenPrice = tokenToCurrentPrice.get(reservePubKey)!;
-    let totalPrice = deposit
+    const reservePubKey = deposit.getReserveId().toString();
+    const name = reserveLookUpTable[reservePubKey];
+    const reserve = reserveContext.getReserveByReserveId(deposit.getReserveId());
+    const exchangeRatio = reserve.getExchangeRatio().getPct()?.getRaw();
+    const liquidationThreshold = reserve.params.liquidationThreshold.getRaw();
+    const tokenPrice = tokenToCurrentPrice.get(reservePubKey)!;
+    const totalPrice = deposit
       .getShare()
       .getRaw()
       .div(exchangeRatio)
