@@ -26,32 +26,17 @@ import { AccountLayout, Token, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 import { redeemReserveCollateralInstruction } from './instructions/redeemReserveCollateral';
 import { parsePriceData } from '@pythnetwork/client';
 import Big from 'big.js';
-import { Port } from '@port.finance/port-sdk';
-import { PortBalance } from '@port.finance/port-sdk/lib/models/PortBalance';
-import { ReserveContext } from '@port.finance/port-sdk/lib/models/ReserveContext';
-import { ReserveInfo } from '@port.finance/port-sdk/lib/models/ReserveInfo';
-import { ReserveId } from '@port.finance/port-sdk/lib/models/ReserveId';
 import {SwitchboardAccountType} from '@switchboard-xyz/switchboard-api';
 import { AccountInfo as TokenAccount } from '@solana/spl-token';
 import BN from 'bn.js';
 import { Provider, Wallet } from '@project-serum/anchor';
+import {Port, Profile, ReserveContext, ReserveId, ReserveInfo} from '@port.finance/port-sdk'
+import { PortBalance } from '@port.finance/port-sdk/dist/cjs/models/PortBalance';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const DISPLAY_FIRST = 10;
 
-const reserveLookUpTable = {
-  'X9ByyhmtQH3Wjku9N5obPy54DbVjZV7Z99TPJZ2rwcs': 'SOL',
-  'DcENuKuYd6BWGhKfGr7eARxodqG12Bz1sN5WA8NwvLRx': 'USDC',
-  '4tqY9Hv7e8YhNQXuH75WKrZ7tTckbv2GfFVxmVcScW5s': 'USDT',
-  'DSw99gXoGzvc4N7cNGU7TJ9bCWFq96NU2Cczi1TabDx2': 'PAI',
-  'ZgS3sv1tJAor2rbGMFLeJwxsEGDiHkcrR2ZaNHZUpyF': 'SRM',
-  'DSST29PMCVkxo8cf5ht9LxrPoMc8jAZt98t6nuJywz8p': 'BTC',
-  'BnhsmYVvNjXK3TGDHLj1Yr1jBGCmD1gZMkAyCwoXsHwt': 'MER',
-  '9gDF5W94RowoDugxT8cM29cX8pKKQitTp2uYVrarBSQ7': 'mSOL',
-  'GRJyCEezbZQibAEfBKCRAg5YoTPP2UcRSTC7RfzoMypy': 'pSOL',
-  '7dXHPrJtwBjQqU1pLKfkHbq9TjQAK9jTms3rnj1i3G77': 'SBR',
-  'BXt3EhK5Tj81aKaVSBD27rLFd5w8A6wmGKDh47JWohEu': 'Saber USDC - USDT LP',
-};
+const portProfile = Profile.forMainNet();
 
 interface EnrichedObligation {
   riskFactor: number;
@@ -88,7 +73,7 @@ async function runPartialLiquidator() {
 
   console.log(`Port liquidator launched on cluster=${clusterUrl}`);
 
-  const reserveContext = await Port.forMainNet().getReserveContext();
+  const reserveContext = await Port.forMainNet({}).getReserveContext();
   const wallets: Map<string, TokenAccount> = new Map();
 
   const tokenAccounts = await getOwnedTokenAccounts(connection, payer.publicKey);
@@ -303,7 +288,7 @@ function getTotalShareTokenCollateralized(
 }
 
 async function getUnhealthyObligations(connection: Connection) {
-  const mainnetPort = Port.forMainNet();
+  const mainnetPort = Port.forMainNet({});
   const portBalances = await mainnetPort.getAllPortBalances();
   const reserves = await mainnetPort.getReserveContext();
   const tokenToCurrentPrice = await readTokenPrices(connection, reserves);
@@ -336,7 +321,7 @@ obligation pubkey: ${ob.obligation.getPortId().toString()}
 
   tokenToCurrentPrice.forEach((price: Big, token: string) => {
     console.log(
-      `name: ${reserveLookUpTable[token]} price: ${price.toString()}`,
+      `name: ${portProfile.getAssetContext().findConfigByReserveId(ReserveId.fromBase58(token))?.getDisplayConfig().getName()} price: ${price.toString()}`,
     );
   });
   console.log('\n');
@@ -350,9 +335,10 @@ function generateEnrichedObligation(
 ): EnrichedObligation {
   let loanValue = new Big(0);
   const borrowedAssetNames: string[] = [];
+  const assetCtx = portProfile.getAssetContext()
   for (const borrow of obligation.getLoans()) {
     const reservePubKey = borrow.getReserveId().toString();
-    const name = reserveLookUpTable[reservePubKey];
+    const name = assetCtx.findConfigByReserveId(ReserveId.fromBase58(reservePubKey))?.getDisplayConfig().getSymbol();
     const reserve = reserveContext.getReserveByReserveId(borrow.getReserveId());
     const tokenPrice: Big = tokenToCurrentPrice.get(reservePubKey);
     if (!tokenPrice) {
@@ -365,14 +351,14 @@ function generateEnrichedObligation(
       .mul(tokenPrice)
       .div(reserve.getQuantityContext().multiplier);
     loanValue = loanValue.add(totalPrice);
-    borrowedAssetNames.push(name);
+    borrowedAssetNames.push(name??'unknow');
   }
   let collateralValue: Big = new Big(0);
   const depositedAssetNames: string[] = [];
 
   for (const deposit of obligation.getCollaterals()) {
     const reservePubKey = deposit.getReserveId().toString();
-    const name = reserveLookUpTable[reservePubKey];
+    const name = assetCtx.findConfigByReserveId(ReserveId.fromBase58(reservePubKey))?.getDisplayConfig().getSymbol();
     const reserve = reserveContext.getReserveByReserveId(deposit.getReserveId());
     const exchangeRatio = reserve.getExchangeRatio().getPct();
     const liquidationThreshold = reserve.params.liquidationThreshold.getRaw();
@@ -388,7 +374,7 @@ function generateEnrichedObligation(
       .mul(liquidationThreshold)
       .div(reserve.getQuantityContext().multiplier);
     collateralValue = collateralValue.add(totalPrice);
-    depositedAssetNames.push(name);
+    depositedAssetNames.push(name ?? 'unknow');
   }
 
   const riskFactor: number =
@@ -627,7 +613,7 @@ async function liquidateByPayingToken(
   const stakeAccounts = await fetchStakingAccounts(
     provider.connection,
     obligation.owner,
-    withdrawReserve.staking_pool,
+    withdrawReserve.stakingPool,
   );
 
   const laons = obligation.getLoans();
@@ -659,10 +645,10 @@ async function liquidateByPayingToken(
       lendingMarket,
       lendingMarketAuthority,
       transferAuthority.publicKey,
-      withdrawReserve.staking_pool !== null
-        ? withdrawReserve.staking_pool
+      withdrawReserve.stakingPool !== null
+        ? withdrawReserve.stakingPool
         : undefined,
-      withdrawReserve.staking_pool !== null
+      withdrawReserve.stakingPool !== null
         ? stakeAccounts[0].pubkey
         : undefined,
     ),

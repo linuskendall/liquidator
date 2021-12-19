@@ -1,4 +1,4 @@
-import { ReserveInfo } from '@port.finance/port-sdk/lib/models/ReserveInfo';
+import { ReserveInfo } from '@port.finance/port-sdk';
 import { SYSVAR_CLOCK_PUBKEY, TransactionInstruction } from '@solana/web3.js';
 import * as BufferLayout from 'buffer-layout';
 import { LENDING_PROGRAM_ID } from '../ids';
@@ -26,9 +26,10 @@ export const refreshReserveInstruction = (
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
   ];
 
-  if (reserve.getOracleId() !== null) {
+  const oracleId = reserve.getOracleId(); 
+  if (oracleId !== null) {
     keys.push({
-      pubkey: reserve.getOracleId()!.key,
+      pubkey: oracleId.key,
       isSigner: false,
       isWritable: false,
     });
