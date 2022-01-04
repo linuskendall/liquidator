@@ -482,7 +482,7 @@ async function liquidateUnhealthyObligation(
   }
 
   if (repayReserveId === null) {
-    throw new Error('no liquidity to repay');
+    throw new Error(`No token to repay at risk obligation: ${obligation.obligation.getId().toString()}`);
   }
 
   const repayReserve: ReserveInfo = reserveContext.getReserve(repayReserveId);
