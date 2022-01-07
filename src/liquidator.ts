@@ -354,8 +354,8 @@ function generateEnrichedObligation(
   tokenToCurrentPrice: Map<string, Big>,
   reserveContext: ReserveContext,
 ): EnrichedObligation {
-  let loanValue = new Big(0);
-  const borrowedAssetNames: string[] = [];
+  let totalLiquidationPrice = new Big(0);
+  const loanAssetNames: string[] = [];
   const assetCtx = portEnvironment.getAssetContext();
   for (const loan of obligation.getLoans()) {
     const reservePubKey = loan.getReserveId().toString();
@@ -374,8 +374,8 @@ function generateEnrichedObligation(
       .getRaw()
       .mul(tokenPrice)
       .div(reserve.getQuantityContext().multiplier); //TODO: test
-    loanValue = loanValue.add(liquidationPrice);
-    borrowedAssetNames.push(name ?? 'unknow');
+    totalLiquidationPrice = totalLiquidationPrice.add(liquidationPrice);
+    loanAssetNames.push(name ?? 'unknown');
   }
   let collateralValue: Big = new Big(0);
   const depositedAssetNames: string[] = [];
@@ -404,16 +404,16 @@ function generateEnrichedObligation(
   }
 
   const riskFactor: number =
-    collateralValue.eq(ZERO) || loanValue.eq(ZERO)
+    collateralValue.eq(ZERO) || totalLiquidationPrice.eq(ZERO)
       ? 0
-      : loanValue.div(collateralValue).toNumber();
+      : totalLiquidationPrice.div(collateralValue).toNumber();
 
   return {
-    loanValue,
+    loanValue: totalLiquidationPrice,
     collateralValue,
     riskFactor,
     obligation,
-    borrowedAssetNames,
+    borrowedAssetNames: loanAssetNames,
     depositedAssetNames,
   };
 }
